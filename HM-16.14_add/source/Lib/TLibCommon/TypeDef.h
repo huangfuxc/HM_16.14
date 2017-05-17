@@ -90,9 +90,12 @@
 
 #define REDUCED_ENCODER_MEMORY                            1 ///< When 1, the encoder will allocate TComPic memory when required and release it when no longer required.
 #define ADAPTIVE_QP_SELECTION                             1 ///< G382: Adaptive reconstruction levels, non-normative part for adaptive QP selection
+
+
+// ====================================================================================================================
+//huangfu_changed
 #define HUANGFU_M                                         1//change in merge list 
 #define HUANGFU_2017_04_27                                1//only change skip and all merge candidate list changed
-#define HUANGFU                                           0//change in AMVP list
 #define HUANGFU_20170504                                  1//changed all merge mode except skip mode
 #define WH                                                480//the half size of one face
 #define WH_2                                              960//the size of one face
@@ -100,12 +103,17 @@
 #define HUANGFU_20170506                                   1//amvpÐÞ¸Ä
 #define HUANGFU_20170508                                  1//changed in merge if PartSize=N*2N the index=1 avaliable not checked.
 #define HUANGFU_20170509                                  1//changde in the right side .
+#define HUANGFU_20170516                                  1//changed the AMVP search method.
+// ====================================================================================================================
 
+
+// ====================================================================================================================
+//zhengruidi
 #define ZhengRuidi_20170319                               1
 #define ZhengRuidi_20170306                               1 ///< Projection-Based Sub-Block motion compensation
 #define ZhengRuidi_20170315                               1 ///< Projection-Based Sub-Block motion compensation
 #define ZhengRuidi_20170422                               1 //set ZhengRuidi_20170422 to 1 means that sub-block motion compensation is only uesd under Merge mode
-
+// ====================================================================================================================
 
 
 

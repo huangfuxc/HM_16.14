@@ -3020,7 +3020,6 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
   TComMvField cMvFieldNeighbours[MRG_MAX_NUM_CANDS << 1]; // double length for mv of both lists
   UChar uhInterDirNeighbours[MRG_MAX_NUM_CANDS];
   Int numValidMergeCand = 0 ;
-
   for ( Int iPartIdx = 0; iPartIdx < iNumPart; iPartIdx++ )//对每个PU都进行这样的操作
   {
     Distortion   uiCost[2] = { std::numeric_limits<Distortion>::max(), std::numeric_limits<Distortion>::max() };
@@ -3032,6 +3031,9 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
     Distortion   bestBiPDist = std::numeric_limits<Distortion>::max();
 
     Distortion   uiCostTempL0[MAX_NUM_REF];
+#if HUANGFU_20170516
+	Bool position = false;
+#endif
     for (Int iNumRef=0; iNumRef < MAX_NUM_REF; iNumRef++)
     {
       uiCostTempL0[iNumRef] = std::numeric_limits<Distortion>::max();
@@ -3075,6 +3077,47 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
             uiBitsTemp--;
           }
         }
+
+#if HUANGFU_20170516
+
+		AMVPInfo*  pcAMVPInfo = pcCU->getCUMvField(eRefPicList)->getAMVPInfo();
+
+		UInt       uiPartAddr = 0;
+		Int        iRoiWidth, iRoiHeight;
+
+		pcCU->getPartIndexAndSize(iPartIdx, uiPartAddr, iRoiWidth, iRoiHeight);
+		// Fill the MV Candidates
+		
+		pcCU->fillMvpCand(iPartIdx, uiPartAddr, eRefPicList, iRefIdxTemp, pcAMVPInfo);
+		for (int i = 0; i < pcAMVPInfo->iN; i++)
+		{
+			if (pcAMVPInfo->m_acMvCand[i].getPos())
+			{
+				position = true;
+				break;
+			}
+		}
+		if (!position)
+		{
+
+			//进行常规的检测
+
+		}
+		else
+		{
+			//每个都进行相应的对比
+			for (int i = 0; i < pcAMVPInfo->iN; i++)
+			{
+				//获取每个位置的Pos，如果不是需要投影的则进行常规的处理
+				pcCU->setMVPIdxSubParts(i, eRefPicList, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+				pcCU->setMVPNumSubParts(pcAMVPInfo->iN, eRefPicList, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+				//cMvTemp实际指向的是每次搜索完真正的MV；cMvPred指向的是预测的MV；
+
+				cMvPred[iRefList][iRefIdxTemp] = pcAMVPInfo->m_acMvCand[i];
+			}
+		}
+
+#endif
         xEstimateMvPredAMVP( pcCU, pcOrgYuv, iPartIdx, eRefPicList, iRefIdxTemp, cMvPred[iRefList][iRefIdxTemp], false, &biPDistTemp);//每个list下的每个参考帧均有一个cMvPred,在HM16.0之后每个帧每个list中最多有两个
         aaiMvpIdx[iRefList][iRefIdxTemp] = pcCU->getMVPIdx(eRefPicList, uiPartAddr);//作为起点的MV的idx
         aaiMvpNum[iRefList][iRefIdxTemp] = pcCU->getMVPNum(eRefPicList, uiPartAddr);//iN的值，即列表中有几个可用的MV
@@ -3153,9 +3196,9 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
 
       UInt uiMotBits[2];
 
-      if(pcCU->getSlice()->getMvdL1ZeroFlag())
+      if(pcCU->getSlice()->getMvdL1ZeroFlag())//当两个list里的对应位置的参考帧的POC号全部相等则为true；
       {
-        xCopyAMVPInfo(&aacAMVPInfo[1][bestBiPRefIdxL1], pcCU->getCUMvField(REF_PIC_LIST_1)->getAMVPInfo());//将右边的拷贝给左边；
+        xCopyAMVPInfo(&aacAMVPInfo[1][bestBiPRefIdxL1], pcCU->getCUMvField(REF_PIC_LIST_1)->getAMVPInfo());//将左边的拷贝给右边；
         pcCU->setMVPIdxSubParts( bestBiPMvpL1, REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
         aaiMvpIdxBi[1][bestBiPRefIdxL1] = bestBiPMvpL1;
         cMvPredBi[1][bestBiPRefIdxL1]   = pcCU->getCUMvField(REF_PIC_LIST_1)->getAMVPInfo()->m_acMvCand[bestBiPMvpL1];
