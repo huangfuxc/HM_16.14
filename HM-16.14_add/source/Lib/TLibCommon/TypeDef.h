@@ -101,9 +101,9 @@
 #define WH_2                                              960//the size of one face
 #define HUANGFU_AMVP                                       1//change in AMVP list
 #define HUANGFU_20170506                                   1//amvpÐÞ¸Ä
-#define HUANGFU_20170508                                  1//changed in merge if PartSize=N*2N the index=1 avaliable not checked.
-#define HUANGFU_20170509                                  1//changde in the right side .
-#define HUANGFU_20170516                                  1//changed the AMVP search method.
+#define HUANGFU_20170508                                   1//changed in merge if PartSize=N*2N the index=1 avaliable not checked.
+#define HUANGFU_20170509                                   1//changde in the right side .
+#define HUANGFU_20170522                                   1//changed the AMVP search method.
 // ====================================================================================================================
 
 

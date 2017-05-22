@@ -3031,7 +3031,7 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
     Distortion   bestBiPDist = std::numeric_limits<Distortion>::max();
 
     Distortion   uiCostTempL0[MAX_NUM_REF];
-#if HUANGFU_20170516
+#if HUANGFU_20170522
 	Bool position = false;
 #endif
     for (Int iNumRef=0; iNumRef < MAX_NUM_REF; iNumRef++)
@@ -3062,114 +3062,219 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
 #endif
 
     //  Uni-directional prediction
-    for ( Int iRefList = 0; iRefList < iNumPredDir; iRefList++ )//为P的话iNumPredDir=1，位B的话iNumPredDir=2；
-    {
-      RefPicList  eRefPicList = ( iRefList ? REF_PIC_LIST_1 : REF_PIC_LIST_0 );
-
-      for ( Int iRefIdxTemp = 0; iRefIdxTemp < pcCU->getSlice()->getNumRefIdx(eRefPicList); iRefIdxTemp++ )
-      {
-        uiBitsTemp = uiMbBits[iRefList];//前面有个
-        if ( pcCU->getSlice()->getNumRefIdx(eRefPicList) > 1 )
-        {
-          uiBitsTemp += iRefIdxTemp+1;
-          if ( iRefIdxTemp == pcCU->getSlice()->getNumRefIdx(eRefPicList)-1 )
-          {
-            uiBitsTemp--;
-          }
-        }
-		
-#if HUANGFU_20170516
-		
-		AMVPInfo*  pcAMVPInfo = pcCU->getCUMvField(eRefPicList)->getAMVPInfo();
-
-		UInt       uiPartAddr = 0;
-		Int        iRoiWidth, iRoiHeight;
-
-		pcCU->getPartIndexAndSize(iPartIdx, uiPartAddr, iRoiWidth, iRoiHeight);
-		// Fill the MV Candidates
-		
-		pcCU->fillMvpCand(iPartIdx, uiPartAddr, eRefPicList, iRefIdxTemp, pcAMVPInfo);
-		for (int i = 0; i < pcAMVPInfo->iN; i++)
+		for (Int iRefList = 0; iRefList < iNumPredDir; iRefList++)//为P的话iNumPredDir=1，位B的话iNumPredDir=2；
 		{
-			if (pcAMVPInfo->m_acMvCand[i].getPos())
+			RefPicList  eRefPicList = (iRefList ? REF_PIC_LIST_1 : REF_PIC_LIST_0);
+
+			for (Int iRefIdxTemp = 0; iRefIdxTemp < pcCU->getSlice()->getNumRefIdx(eRefPicList); iRefIdxTemp++)
 			{
-				position = true;
-				break;
-			}
-		}
+				uiBitsTemp = uiMbBits[iRefList];//前面有个
+				if (pcCU->getSlice()->getNumRefIdx(eRefPicList) > 1)
+				{
+					uiBitsTemp += iRefIdxTemp + 1;
+					if (iRefIdxTemp == pcCU->getSlice()->getNumRefIdx(eRefPicList) - 1)
+					{
+						uiBitsTemp--;
+					}
+				}
+
+#if HUANGFU_20170522
+
+				AMVPInfo*  pcAMVPInfo = pcCU->getCUMvField(eRefPicList)->getAMVPInfo();
+
+				UInt       uiPartAddr = 0;
+				Int        iRoiWidth, iRoiHeight;
+
+				pcCU->getPartIndexAndSize(iPartIdx, uiPartAddr, iRoiWidth, iRoiHeight);
+				// Fill the MV Candidates
+
+				pcCU->fillMvpCand(iPartIdx, uiPartAddr, eRefPicList, iRefIdxTemp, pcAMVPInfo);
+				for (int i = 0; i < pcAMVPInfo->iN; i++)
+				{
+					if (pcAMVPInfo->m_acMvCand[i].getPos())
+					{
+						position = true;
+						break;
+					}
+				}
 #endif
-#if HUANGFU_20170516_
-		if (!position)
-		{
+#if HUANGFU_20170522
+				if (!position)
+				{
+					//进行常规的检测
+					xEstimateMvPredAMVP(pcCU, pcOrgYuv, iPartIdx, eRefPicList, iRefIdxTemp, cMvPred[iRefList][iRefIdxTemp], false, &biPDistTemp);//每个list下的每个参考帧均有一个cMvPred,在HM16.0之后每个帧每个list中最多有两个
+					aaiMvpIdx[iRefList][iRefIdxTemp] = pcCU->getMVPIdx(eRefPicList, uiPartAddr);//作为起点的MV的idx
+					aaiMvpNum[iRefList][iRefIdxTemp] = pcCU->getMVPNum(eRefPicList, uiPartAddr);//iN的值，即列表中有几个可用的MV
 
-			//进行常规的检测
+					if (pcCU->getSlice()->getMvdL1ZeroFlag() && iRefList == 1 && biPDistTemp < bestBiPDist)
+					{
+						bestBiPDist = biPDistTemp;
+						bestBiPMvpL1 = aaiMvpIdx[iRefList][iRefIdxTemp];
+						bestBiPRefIdxL1 = iRefIdxTemp;
+					}
+
+					uiBitsTemp += m_auiMVPIdxCost[aaiMvpIdx[iRefList][iRefIdxTemp]][AMVP_MAX_NUM_CANDS];
+
+					if (m_pcEncCfg->getFastMEForGenBLowDelayEnabled() && iRefList == 1)    // list 1
+					{
+						if (pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp) >= 0)
+						{
+							cMvTemp[1][iRefIdxTemp] = cMvTemp[0][pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)];
+							uiCostTemp = uiCostTempL0[pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)];
+							/*first subtract the bit-rate part of the cost of the other list*/
+							uiCostTemp -= m_pcRdCost->getCost(uiBitsTempL0[pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)]);
+							/*correct the bit-rate part of the current ref*/
+							m_pcRdCost->setPredictor(cMvPred[iRefList][iRefIdxTemp]);
+							uiBitsTemp += m_pcRdCost->getBitsOfVectorWithPredictor(cMvTemp[1][iRefIdxTemp].getHor(), cMvTemp[1][iRefIdxTemp].getVer());
+							/*calculate the correct cost*/
+							uiCostTemp += m_pcRdCost->getCost(uiBitsTemp);
+						}
+						else
+						{
+							xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPred[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
+						}
+					}
+					else
+					{
+						xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPred[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
+					}
+					xCopyAMVPInfo(pcCU->getCUMvField(eRefPicList)->getAMVPInfo(), &aacAMVPInfo[iRefList][iRefIdxTemp]); // must always be done ( also when AMVP_MODE = AM_NONE )
+					xCheckBestMVP(pcCU, eRefPicList, cMvTemp[iRefList][iRefIdxTemp], cMvPred[iRefList][iRefIdxTemp], aaiMvpIdx[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
+
+					if (iRefList == 0)
+					{
+						uiCostTempL0[iRefIdxTemp] = uiCostTemp;
+						uiBitsTempL0[iRefIdxTemp] = uiBitsTemp;
+					}
+					if (uiCostTemp < uiCost[iRefList])
+					{
+						uiCost[iRefList] = uiCostTemp;
+						uiBits[iRefList] = uiBitsTemp; // storing for bi-prediction
+
+						// set motion
+						cMv[iRefList] = cMvTemp[iRefList][iRefIdxTemp];
+						iRefIdx[iRefList] = iRefIdxTemp;
+					}
+
+					if (iRefList == 1 && uiCostTemp < costValidList1 && pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp) < 0)
+					{
+						costValidList1 = uiCostTemp;
+						bitsValidList1 = uiBitsTemp;
+
+						// set motion
+						mvValidList1 = cMvTemp[iRefList][iRefIdxTemp];
+						refIdxValidList1 = iRefIdxTemp;
+					}
+
+				}
+				else
+				{
+					//else
+					Int MvpIdx = 0;
+					TComMv  Pred;
+					Distortion   CostTemp = std::numeric_limits<Distortion>::max();
+						//每个都进行相应的对比
+						for (int i = 0; i < pcAMVPInfo->iN; i++)
+						{
+							//获取每个位置的Pos，如果不是需要投影的则进行常规的处理
+							UInt         uiBitsTemp_ = uiBitsTemp;
+							pcCU->setMVPIdxSubParts(i, eRefPicList, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+							pcCU->setMVPNumSubParts(pcAMVPInfo->iN, eRefPicList, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+							//cMvTemp实际指向的是每次搜索完真正的MV；cMvPred指向的是预测的MV；
+							aaiMvpIdx[iRefList][iRefIdxTemp] = pcCU->getMVPIdx(eRefPicList, uiPartAddr);//作为起点的MV的idx
+							aaiMvpNum[iRefList][iRefIdxTemp] = pcCU->getMVPNum(eRefPicList, uiPartAddr);//iN的值，即列表中有几个可用的MV
+							cMvPred[iRefList][iRefIdxTemp] = pcAMVPInfo->m_acMvCand[i];
+							biPDistTemp = xGetTemplateCost(pcCU, uiPartAddr, pcOrgYuv, &m_cYuvPredTemp, cMvPred[iRefList][iRefIdxTemp], 0, AMVP_MAX_NUM_CANDS, eRefPicList, iRefIdxTemp, iRoiWidth, iRoiHeight);
+							
+							if (pcCU->getSlice()->getMvdL1ZeroFlag() && iRefList == 1 && biPDistTemp < bestBiPDist)
+							{
+								bestBiPDist = biPDistTemp;
+								bestBiPMvpL1 = aaiMvpIdx[iRefList][iRefIdxTemp];
+								bestBiPRefIdxL1 = iRefIdxTemp;
+							}
+							uiBitsTemp_ += m_auiMVPIdxCost[aaiMvpIdx[iRefList][iRefIdxTemp]][AMVP_MAX_NUM_CANDS];
+							if (m_pcEncCfg->getFastMEForGenBLowDelayEnabled() && iRefList == 1)    // list 1
+							{
+								if (pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp) >= 0)
+								{
+									cMvTemp[1][iRefIdxTemp] = cMvTemp[0][pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)];
+									uiCostTemp = uiCostTempL0[pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)];
+									/*first subtract the bit-rate part of the cost of the other list*/
+									uiCostTemp -= m_pcRdCost->getCost(uiBitsTempL0[pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)]);
+									/*correct the bit-rate part of the current ref*/
+									m_pcRdCost->setPredictor(cMvPred[iRefList][iRefIdxTemp]);
+									uiBitsTemp_ += m_pcRdCost->getBitsOfVectorWithPredictor(cMvTemp[1][iRefIdxTemp].getHor(), cMvTemp[1][iRefIdxTemp].getVer());
+									/*calculate the correct cost*/
+									uiCostTemp += m_pcRdCost->getCost(uiBitsTemp_);
+								}
+								else
+								{
+									xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPred[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp_, uiCostTemp);
+								}
+							}
+							else
+							{
+								xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPred[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp_, uiCostTemp);
+							}
+							xCopyAMVPInfo(pcCU->getCUMvField(eRefPicList)->getAMVPInfo(), &aacAMVPInfo[iRefList][iRefIdxTemp]); // must always be done ( also when AMVP_MODE = AM_NONE 左边的是source，右边的是目的)
+							//xCheckBestMVP(pcCU, eRefPicList, cMvTemp[iRefList][iRefIdxTemp], cMvPred[iRefList][iRefIdxTemp], aaiMvpIdx[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
+							//应该在此处加上运动矢量代价之后再进行比较计算；
+							m_pcRdCost->selectMotionLambda(true, 0, pcCU->getCUTransquantBypass(0));
+							m_pcRdCost->setCostScale(0);
+							m_pcRdCost->setPredictor(cMvPred[iRefList][iRefIdxTemp]);
+							uiBitsTemp_ += m_pcRdCost->getBitsOfVectorWithPredictor(cMvTemp[iRefList][iRefIdxTemp].getHor(), cMvTemp[iRefList][iRefIdxTemp].getVer());
+							/*calculate the correct cost*/
+							uiCostTemp += m_pcRdCost->getCost(uiBitsTemp_);
+							if (!i)
+							{
+								MvpIdx = aaiMvpIdx[iRefList][iRefIdxTemp];
+								Pred = cMvPred[iRefList][iRefIdxTemp];
+								CostTemp = uiCostTemp;
+							}
+							if (i)
+							{
+								if (CostTemp < uiCostTemp)
+								{
+									aaiMvpIdx[iRefList][iRefIdxTemp] = MvpIdx;
+									cMvPred[iRefList][iRefIdxTemp] = Pred ;
+									uiCostTemp = CostTemp ;
+								}
+
+							}
+							if (iRefList == 0)
+							{
+								uiCostTempL0[iRefIdxTemp] = uiCostTemp;
+								uiBitsTempL0[iRefIdxTemp] = uiBitsTemp_;
+							}
+							if (uiCostTemp < uiCost[iRefList])
+							{
+								uiCost[iRefList] = uiCostTemp;
+								uiBits[iRefList] = uiBitsTemp_; // storing for bi-prediction
+
+								// set motion
+								cMv[iRefList] = cMvTemp[iRefList][iRefIdxTemp];
+								iRefIdx[iRefList] = iRefIdxTemp;
+								
+							}
+							
+							if (iRefList == 1 && uiCostTemp < costValidList1 && pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp) < 0)
+							{
+								costValidList1 = uiCostTemp;
+								bitsValidList1 = uiBitsTemp_;
+
+								// set motion
+								mvValidList1 = cMvTemp[iRefList][iRefIdxTemp];
+								refIdxValidList1 = iRefIdxTemp;
+							}
+							//uiBitsTemp -= m_auiMVPIdxCost[aaiMvpIdx[iRefList][iRefIdxTemp]][AMVP_MAX_NUM_CANDS];
+
+						}
+					
 
 
-		xEstimateMvPredAMVP(pcCU, pcOrgYuv, iPartIdx, eRefPicList, iRefIdxTemp, cMvPred[iRefList][iRefIdxTemp], false, &biPDistTemp);//每个list下的每个参考帧均有一个cMvPred,在HM16.0之后每个帧每个list中最多有两个
-		aaiMvpIdx[iRefList][iRefIdxTemp] = pcCU->getMVPIdx(eRefPicList, uiPartAddr);//作为起点的MV的idx
-		aaiMvpNum[iRefList][iRefIdxTemp] = pcCU->getMVPNum(eRefPicList, uiPartAddr);//iN的值，即列表中有几个可用的MV
-
-		if (pcCU->getSlice()->getMvdL1ZeroFlag() && iRefList == 1 && biPDistTemp < bestBiPDist)
-		{
-			bestBiPDist = biPDistTemp;
-			bestBiPMvpL1 = aaiMvpIdx[iRefList][iRefIdxTemp];
-			bestBiPRefIdxL1 = iRefIdxTemp;
-		}
-
-		uiBitsTemp += m_auiMVPIdxCost[aaiMvpIdx[iRefList][iRefIdxTemp]][AMVP_MAX_NUM_CANDS];
-
-		if (m_pcEncCfg->getFastMEForGenBLowDelayEnabled() && iRefList == 1)    // list 1
-		{
-			if (pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp) >= 0)
-			{
-				cMvTemp[1][iRefIdxTemp] = cMvTemp[0][pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)];
-				uiCostTemp = uiCostTempL0[pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)];
-				/*first subtract the bit-rate part of the cost of the other list*/
-				uiCostTemp -= m_pcRdCost->getCost(uiBitsTempL0[pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp)]);
-				/*correct the bit-rate part of the current ref*/
-				m_pcRdCost->setPredictor(cMvPred[iRefList][iRefIdxTemp]);
-				uiBitsTemp += m_pcRdCost->getBitsOfVectorWithPredictor(cMvTemp[1][iRefIdxTemp].getHor(), cMvTemp[1][iRefIdxTemp].getVer());
-				/*calculate the correct cost*/
-				uiCostTemp += m_pcRdCost->getCost(uiBitsTemp);
+				}
 			}
-			else
-			{
-				xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPred[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
-			}
 		}
-		else
-		{
-			xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPred[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
-		}
-		xCopyAMVPInfo(pcCU->getCUMvField(eRefPicList)->getAMVPInfo(), &aacAMVPInfo[iRefList][iRefIdxTemp]); // must always be done ( also when AMVP_MODE = AM_NONE )
-		xCheckBestMVP(pcCU, eRefPicList, cMvTemp[iRefList][iRefIdxTemp], cMvPred[iRefList][iRefIdxTemp], aaiMvpIdx[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
-
-		if (iRefList == 0)
-		{
-			uiCostTempL0[iRefIdxTemp] = uiCostTemp;
-			uiBitsTempL0[iRefIdxTemp] = uiBitsTemp;
-		}
-		if (uiCostTemp < uiCost[iRefList])
-		{
-			uiCost[iRefList] = uiCostTemp;
-			uiBits[iRefList] = uiBitsTemp; // storing for bi-prediction
-
-			// set motion
-			cMv[iRefList] = cMvTemp[iRefList][iRefIdxTemp];
-			iRefIdx[iRefList] = iRefIdxTemp;
-		}
-
-		if (iRefList == 1 && uiCostTemp < costValidList1 && pcCU->getSlice()->getList1IdxToList0Idx(iRefIdxTemp) < 0)
-		{
-			costValidList1 = uiCostTemp;
-			bitsValidList1 = uiBitsTemp;
-
-			// set motion
-			mvValidList1 = cMvTemp[iRefList][iRefIdxTemp];
-			refIdxValidList1 = iRefIdxTemp;
-		}
-		}
-	  }
 
 	//  Bi-predictive Motion estimation
 	if ((pcCU->getSlice()->isInterB()) && (pcCU->isBipredRestriction(iPartIdx) == false))
@@ -3192,6 +3297,80 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
 
 			cMvBi[1] = cMvPredBi[1][bestBiPRefIdxL1];
 			iRefIdxBi[1] = bestBiPRefIdxL1;
+#if HUANGFU_20170522
+			TComMv*  pcMv1;		//一个CU内部的所有MV的起点指针；即为指向左上角位置的MV。
+			Int  xP, yP, nPSW, nPSH;
+			UInt CUPartAddr = pcCU->getZorderIdxInCtu();
+			pcMv1 = pcCU->getCUMvField(REF_PIC_LIST_1)->getMv();//
+			pcCU->getPartPosition(iPartIdx, xP, yP, nPSW, nPSH);//获得当前PU的位置以及左上角的坐标位置。
+			if (cMvPredBi[1][bestBiPRefIdxL1].getPos())
+			{
+				pcMv1[uiPartAddr].setPos(cMvPredBi[1][bestBiPRefIdxL1].getPos());
+
+				pcCU->calculateMV(xP, yP, nPSW, nPSH, pcMv1, uiPartAddr, CUPartAddr, cMvPredBi[1][bestBiPRefIdxL1]);
+				for (int i = 0; i < nPSH/ 4; i++)
+				{
+					for (int j = 0; j < nPSW/ 4; j++)
+					{
+						TComMv cMv1 = pcCU->getCUMvField(REF_PIC_LIST_1)->getMv(g_auiRasterToZscan[g_auiZscanToRaster[uiPartAddr + pcCU->getZorderIdxInCtu()] + j + 16 * i] - pcCU->getZorderIdxInCtu());
+						Int mvx = cMv1.getHor() + cMvBi[1].getHor() - cMvPredBi[1][bestBiPRefIdxL1].getHor();
+						Int mvy = cMv1.getVer() + cMvBi[1].getVer() - cMvPredBi[1][bestBiPRefIdxL1].getVer();
+						pcMv1[g_auiRasterToZscan[g_auiZscanToRaster[uiPartAddr + CUPartAddr] + j + 16 * i] - CUPartAddr].setHor(mvx);
+						pcMv1[g_auiRasterToZscan[g_auiZscanToRaster[uiPartAddr + CUPartAddr] + j + 16 * i] - CUPartAddr].setVer(mvy);	
+					}
+				}
+				pcCU->getCUMvField(REF_PIC_LIST_1)->setAllRefIdx(iRefIdxBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
+				TComYuv* pcYuvPred = &m_acYuvPred[REF_PIC_LIST_1];
+				motionCompensation(pcCU, pcYuvPred, REF_PIC_LIST_1, iPartIdx);
+
+				uiMotBits[0] = uiBits[0] - uiMbBits[0];
+				uiMotBits[1] = uiMbBits[1];
+
+				if (pcCU->getSlice()->getNumRefIdx(REF_PIC_LIST_1) > 1)
+				{
+					uiMotBits[1] += bestBiPRefIdxL1 + 1;
+					if (bestBiPRefIdxL1 == pcCU->getSlice()->getNumRefIdx(REF_PIC_LIST_1) - 1)
+					{
+						uiMotBits[1]--;
+					}
+				}
+
+				uiMotBits[1] += m_auiMVPIdxCost[aaiMvpIdxBi[1][bestBiPRefIdxL1]][AMVP_MAX_NUM_CANDS];
+
+				uiBits[2] = uiMbBits[2] + uiMotBits[0] + uiMotBits[1];
+
+				cMvTemp[1][bestBiPRefIdxL1] = cMvBi[1];
+
+				//此处是否要将pcMv1置为0？？？
+			}
+
+			else
+			{
+				pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMv(cMvBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
+				pcCU->getCUMvField(REF_PIC_LIST_1)->setAllRefIdx(iRefIdxBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
+				TComYuv* pcYuvPred = &m_acYuvPred[REF_PIC_LIST_1];
+				motionCompensation(pcCU, pcYuvPred, REF_PIC_LIST_1, iPartIdx);
+
+				uiMotBits[0] = uiBits[0] - uiMbBits[0];
+				uiMotBits[1] = uiMbBits[1];
+
+				if (pcCU->getSlice()->getNumRefIdx(REF_PIC_LIST_1) > 1)
+				{
+					uiMotBits[1] += bestBiPRefIdxL1 + 1;
+					if (bestBiPRefIdxL1 == pcCU->getSlice()->getNumRefIdx(REF_PIC_LIST_1) - 1)
+					{
+						uiMotBits[1]--;
+					}
+				}
+
+				uiMotBits[1] += m_auiMVPIdxCost[aaiMvpIdxBi[1][bestBiPRefIdxL1]][AMVP_MAX_NUM_CANDS];
+
+				uiBits[2] = uiMbBits[2] + uiMotBits[0] + uiMotBits[1];
+
+				cMvTemp[1][bestBiPRefIdxL1] = cMvBi[1];
+
+			}
+#else
 			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMv(cMvBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
 			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllRefIdx(iRefIdxBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
 			TComYuv* pcYuvPred = &m_acYuvPred[REF_PIC_LIST_1];
@@ -3214,6 +3393,7 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
 			uiBits[2] = uiMbBits[2] + uiMotBits[0] + uiMotBits[1];
 
 			cMvTemp[1][bestBiPRefIdxL1] = cMvBi[1];
+#endif
 		}
 		else
 		{
@@ -3252,10 +3432,49 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
 			}
 			if (iIter == 0 && !pcCU->getSlice()->getMvdL1ZeroFlag())
 			{
+#if HUANGFU_20170522
+				TComMv*  pcMv1;		//一个CU内部的所有MV的起点指针；即为指向左上角位置的MV。
+				Int  xP, yP, nPSW, nPSH;
+				UInt CUPartAddr = pcCU->getZorderIdxInCtu();
+				pcMv1 = pcCU->getCUMvField(RefPicList(1 - iRefList))->getMv();//
+				pcCU->getPartPosition(iPartIdx, xP, yP, nPSW, nPSH);//获得当前PU的位置以及左上角的坐标位置。
+				if (cMvPredBi[1 - iRefList][iRefIdxBi[1 - iRefList]].getPos())
+				{
+					pcMv1[uiPartAddr].setPos(cMv[1 - iRefList].getPos());
+					//cMvPredBi
+					pcCU->calculateMV(xP, yP, nPSW, nPSH, pcMv1, uiPartAddr, CUPartAddr, cMvPredBi[1 - iRefList][iRefIdxBi[1 - iRefList]]);
+					for (int i = 0; i < nPSH / 4; i++)
+					{
+						for (int j = 0; j < nPSW / 4; j++)
+						{
+							TComMv cMv1 = pcCU->getCUMvField(RefPicList(1 - iRefList))->getMv(g_auiRasterToZscan[g_auiZscanToRaster[uiPartAddr + pcCU->getZorderIdxInCtu()] + j + 16 * i] - pcCU->getZorderIdxInCtu());
+							Int mvx = cMv1.getHor() + cMv[1 - iRefList].getHor() - cMvPredBi[1 - iRefList][iRefIdxBi[1 - iRefList]].getHor();
+							Int mvy = cMv1.getVer() + cMv[1 - iRefList].getVer() - cMvPredBi[1 - iRefList][iRefIdxBi[1 - iRefList]].getVer();
+							pcMv1[g_auiRasterToZscan[g_auiZscanToRaster[uiPartAddr + CUPartAddr] + j + 16 * i] - CUPartAddr].setHor(mvx);
+							pcMv1[g_auiRasterToZscan[g_auiZscanToRaster[uiPartAddr + CUPartAddr] + j + 16 * i] - CUPartAddr].setVer(mvy);
+						}
+					}
+					pcCU->getCUMvField(RefPicList(1 - iRefList))->setAllRefIdx(iRefIdx[1 - iRefList], ePartSize, uiPartAddr, 0, iPartIdx);
+					TComYuv* pcYuvPred = &m_acYuvPred[1 - iRefList];
+					motionCompensation(pcCU, pcYuvPred, RefPicList(1 - iRefList), iPartIdx);
+
+					
+					//此处是否要将pcMv1置为0？？？
+				}
+
+				else
+				{
+					pcCU->getCUMvField(RefPicList(1 - iRefList))->setAllMv(cMv[1 - iRefList], ePartSize, uiPartAddr, 0, iPartIdx);
+					pcCU->getCUMvField(RefPicList(1 - iRefList))->setAllRefIdx(iRefIdx[1 - iRefList], ePartSize, uiPartAddr, 0, iPartIdx);
+
+				}
+#else
 				pcCU->getCUMvField(RefPicList(1 - iRefList))->setAllMv(cMv[1 - iRefList], ePartSize, uiPartAddr, 0, iPartIdx);
 				pcCU->getCUMvField(RefPicList(1 - iRefList))->setAllRefIdx(iRefIdx[1 - iRefList], ePartSize, uiPartAddr, 0, iPartIdx);
+#endif
 				TComYuv*  pcYuvPred = &m_acYuvPred[1 - iRefList];
 				motionCompensation(pcCU, pcYuvPred, RefPicList(1 - iRefList), iPartIdx);
+
 			}
 
 			RefPicList  eRefPicList = (iRefList ? REF_PIC_LIST_1 : REF_PIC_LIST_0);
@@ -3282,12 +3501,50 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
 						uiBitsTemp--;
 					}
 				}
+#if HUANGFU_20170522
+				if(!cMvPredBi[iRefList][iRefIdxTemp].getPos())
+				{
+					uiBitsTemp += m_auiMVPIdxCost[aaiMvpIdxBi[iRefList][iRefIdxTemp]][AMVP_MAX_NUM_CANDS];
+					// call ME
+					xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPredBi[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp, true);
+
+					xCopyAMVPInfo(&aacAMVPInfo[iRefList][iRefIdxTemp], pcCU->getCUMvField(eRefPicList)->getAMVPInfo());
+					xCheckBestMVP(pcCU, eRefPicList, cMvTemp[iRefList][iRefIdxTemp], cMvPredBi[iRefList][iRefIdxTemp], aaiMvpIdxBi[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
+
+
+				}
+				else
+				{
+
+
+					AMVPInfo*  pcAMVPInfo = pcCU->getCUMvField(eRefPicList)->getAMVPInfo();
+
+					UInt       uiPartAddr = 0;
+					Int        iRoiWidth, iRoiHeight;
+
+					pcCU->getPartIndexAndSize(iPartIdx, uiPartAddr, iRoiWidth, iRoiHeight);
+					// Fill the MV Candidates
+
+					pcCU->fillMvpCand(iPartIdx, uiPartAddr, eRefPicList, iRefIdxTemp, pcAMVPInfo);
+
+
+
+					uiBitsTemp += m_auiMVPIdxCost[aaiMvpIdxBi[iRefList][iRefIdxTemp]][AMVP_MAX_NUM_CANDS];
+					// call ME
+					xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPredBi[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp, true);
+
+					xCopyAMVPInfo(&aacAMVPInfo[iRefList][iRefIdxTemp], pcCU->getCUMvField(eRefPicList)->getAMVPInfo());
+
+
+				}
+#else
 				uiBitsTemp += m_auiMVPIdxCost[aaiMvpIdxBi[iRefList][iRefIdxTemp]][AMVP_MAX_NUM_CANDS];
 				// call ME
 				xMotionEstimation(pcCU, pcOrgYuv, iPartIdx, eRefPicList, &cMvPredBi[iRefList][iRefIdxTemp], iRefIdxTemp, cMvTemp[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp, true);
 
 				xCopyAMVPInfo(&aacAMVPInfo[iRefList][iRefIdxTemp], pcCU->getCUMvField(eRefPicList)->getAMVPInfo());
 				xCheckBestMVP(pcCU, eRefPicList, cMvTemp[iRefList][iRefIdxTemp], cMvPredBi[iRefList][iRefIdxTemp], aaiMvpIdxBi[iRefList][iRefIdxTemp], uiBitsTemp, uiCostTemp);
+#endif
 
 				if (uiCostTemp < uiCostBi)
 				{
@@ -3333,100 +3590,7 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
 	} //end if bTestNormalMC
 #endif
 	//  Clear Motion Field
-	pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMvField(TComMvField(), ePartSize, uiPartAddr, 0, iPartIdx);
-	pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMvField(TComMvField(), ePartSize, uiPartAddr, 0, iPartIdx);
-	pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMvd(cMvZero, ePartSize, uiPartAddr, 0, iPartIdx);
-	pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMvd(cMvZero, ePartSize, uiPartAddr, 0, iPartIdx);
-
-	pcCU->setMVPIdxSubParts(-1, REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-	pcCU->setMVPNumSubParts(-1, REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-	pcCU->setMVPIdxSubParts(-1, REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-	pcCU->setMVPNumSubParts(-1, REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-
-	UInt uiMEBits = 0;
-	// Set Motion Field_
-	cMv[1] = mvValidList1;
-	iRefIdx[1] = refIdxValidList1;
-	uiBits[1] = bitsValidList1;
-	uiCost[1] = costValidList1;
-
-#if AMP_MRG
-	if (bTestNormalMC)
-	{
-#endif
-		if (uiCostBi <= uiCost[0] && uiCostBi <= uiCost[1])
-		{
-			uiLastMode = 2;
-			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMv(cMvBi[0], ePartSize, uiPartAddr, 0, iPartIdx);
-			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllRefIdx(iRefIdxBi[0], ePartSize, uiPartAddr, 0, iPartIdx);
-			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMv(cMvBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
-			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllRefIdx(iRefIdxBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
-
-			TempMv = cMvBi[0] - cMvPredBi[0][iRefIdxBi[0]];
-			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMvd(TempMv, ePartSize, uiPartAddr, 0, iPartIdx);
-
-			TempMv = cMvBi[1] - cMvPredBi[1][iRefIdxBi[1]];
-			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMvd(TempMv, ePartSize, uiPartAddr, 0, iPartIdx);
-
-			pcCU->setInterDirSubParts(3, uiPartAddr, iPartIdx, pcCU->getDepth(0));
-
-			pcCU->setMVPIdxSubParts(aaiMvpIdxBi[0][iRefIdxBi[0]], REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-			pcCU->setMVPNumSubParts(aaiMvpNum[0][iRefIdxBi[0]], REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-			pcCU->setMVPIdxSubParts(aaiMvpIdxBi[1][iRefIdxBi[1]], REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-			pcCU->setMVPNumSubParts(aaiMvpNum[1][iRefIdxBi[1]], REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-
-			uiMEBits = uiBits[2];
-		}
-		else if (uiCost[0] <= uiCost[1])
-		{
-			uiLastMode = 0;
-			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMv(cMv[0], ePartSize, uiPartAddr, 0, iPartIdx);
-			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllRefIdx(iRefIdx[0], ePartSize, uiPartAddr, 0, iPartIdx);
-
-			TempMv = cMv[0] - cMvPred[0][iRefIdx[0]];
-			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMvd(TempMv, ePartSize, uiPartAddr, 0, iPartIdx);
-
-			pcCU->setInterDirSubParts(1, uiPartAddr, iPartIdx, pcCU->getDepth(0));
-
-			pcCU->setMVPIdxSubParts(aaiMvpIdx[0][iRefIdx[0]], REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-			pcCU->setMVPNumSubParts(aaiMvpNum[0][iRefIdx[0]], REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-
-			uiMEBits = uiBits[0];
-		}
-		else
-		{
-			uiLastMode = 1;
-			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMv(cMv[1], ePartSize, uiPartAddr, 0, iPartIdx);
-			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllRefIdx(iRefIdx[1], ePartSize, uiPartAddr, 0, iPartIdx);
-
-			TempMv = cMv[1] - cMvPred[1][iRefIdx[1]];
-			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMvd(TempMv, ePartSize, uiPartAddr, 0, iPartIdx);
-
-			pcCU->setInterDirSubParts(2, uiPartAddr, iPartIdx, pcCU->getDepth(0));
-
-			pcCU->setMVPIdxSubParts(aaiMvpIdx[1][iRefIdx[1]], REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-			pcCU->setMVPNumSubParts(aaiMvpNum[1][iRefIdx[1]], REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-
-			uiMEBits = uiBits[1];
-		}
-
-
-
-		}
-
-		//else
-		{
-			//每个都进行相应的对比
-			for (int i = 0; i < pcAMVPInfo->iN; i++)
-			{
-				//获取每个位置的Pos，如果不是需要投影的则进行常规的处理
-				pcCU->setMVPIdxSubParts(i, eRefPicList, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-				pcCU->setMVPNumSubParts(pcAMVPInfo->iN, eRefPicList, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
-				//cMvTemp实际指向的是每次搜索完真正的MV；cMvPred指向的是预测的MV；
-
-				cMvPred[iRefList][iRefIdxTemp] = pcAMVPInfo->m_acMvCand[i];
-			}
-		}
+	
 
 #else
         xEstimateMvPredAMVP( pcCU, pcOrgYuv, iPartIdx, eRefPicList, iRefIdxTemp, cMvPred[iRefList][iRefIdxTemp], false, &biPDistTemp);//每个list下的每个参考帧均有一个cMvPred,在HM16.0之后每个帧每个list中最多有两个
@@ -3733,10 +3897,94 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
 
       uiMEBits = uiBits[1];
     }
-#endif
+
 #if AMP_MRG
     } // end if bTestNormalMC
 #endif
+#endif
+
+
+	pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMvField(TComMvField(), ePartSize, uiPartAddr, 0, iPartIdx);
+	pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMvField(TComMvField(), ePartSize, uiPartAddr, 0, iPartIdx);
+	pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMvd(cMvZero, ePartSize, uiPartAddr, 0, iPartIdx);
+	pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMvd(cMvZero, ePartSize, uiPartAddr, 0, iPartIdx);
+
+	pcCU->setMVPIdxSubParts(-1, REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+	pcCU->setMVPNumSubParts(-1, REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+	pcCU->setMVPIdxSubParts(-1, REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+	pcCU->setMVPNumSubParts(-1, REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+
+	UInt uiMEBits = 0;
+	// Set Motion Field_
+	cMv[1] = mvValidList1;
+	iRefIdx[1] = refIdxValidList1;
+	uiBits[1] = bitsValidList1;
+	uiCost[1] = costValidList1;
+
+#if AMP_MRG
+	if (bTestNormalMC)
+	{
+#endif
+		if (uiCostBi <= uiCost[0] && uiCostBi <= uiCost[1])
+		{
+			uiLastMode = 2;
+			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMv(cMvBi[0], ePartSize, uiPartAddr, 0, iPartIdx);
+			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllRefIdx(iRefIdxBi[0], ePartSize, uiPartAddr, 0, iPartIdx);
+			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMv(cMvBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
+			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllRefIdx(iRefIdxBi[1], ePartSize, uiPartAddr, 0, iPartIdx);
+
+			TempMv = cMvBi[0] - cMvPredBi[0][iRefIdxBi[0]];
+			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMvd(TempMv, ePartSize, uiPartAddr, 0, iPartIdx);
+
+			TempMv = cMvBi[1] - cMvPredBi[1][iRefIdxBi[1]];
+			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMvd(TempMv, ePartSize, uiPartAddr, 0, iPartIdx);
+
+			pcCU->setInterDirSubParts(3, uiPartAddr, iPartIdx, pcCU->getDepth(0));
+
+			pcCU->setMVPIdxSubParts(aaiMvpIdxBi[0][iRefIdxBi[0]], REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+			pcCU->setMVPNumSubParts(aaiMvpNum[0][iRefIdxBi[0]], REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+			pcCU->setMVPIdxSubParts(aaiMvpIdxBi[1][iRefIdxBi[1]], REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+			pcCU->setMVPNumSubParts(aaiMvpNum[1][iRefIdxBi[1]], REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+
+			uiMEBits = uiBits[2];
+		}
+		else if (uiCost[0] <= uiCost[1])
+		{
+			uiLastMode = 0;
+			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMv(cMv[0], ePartSize, uiPartAddr, 0, iPartIdx);
+			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllRefIdx(iRefIdx[0], ePartSize, uiPartAddr, 0, iPartIdx);
+
+			TempMv = cMv[0] - cMvPred[0][iRefIdx[0]];
+			pcCU->getCUMvField(REF_PIC_LIST_0)->setAllMvd(TempMv, ePartSize, uiPartAddr, 0, iPartIdx);
+
+			pcCU->setInterDirSubParts(1, uiPartAddr, iPartIdx, pcCU->getDepth(0));
+
+			pcCU->setMVPIdxSubParts(aaiMvpIdx[0][iRefIdx[0]], REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+			pcCU->setMVPNumSubParts(aaiMvpNum[0][iRefIdx[0]], REF_PIC_LIST_0, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+
+			uiMEBits = uiBits[0];
+		}
+		else
+		{
+			uiLastMode = 1;
+			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMv(cMv[1], ePartSize, uiPartAddr, 0, iPartIdx);
+			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllRefIdx(iRefIdx[1], ePartSize, uiPartAddr, 0, iPartIdx);
+
+			TempMv = cMv[1] - cMvPred[1][iRefIdx[1]];
+			pcCU->getCUMvField(REF_PIC_LIST_1)->setAllMvd(TempMv, ePartSize, uiPartAddr, 0, iPartIdx);
+
+			pcCU->setInterDirSubParts(2, uiPartAddr, iPartIdx, pcCU->getDepth(0));
+
+			pcCU->setMVPIdxSubParts(aaiMvpIdx[1][iRefIdx[1]], REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+			pcCU->setMVPNumSubParts(aaiMvpNum[1][iRefIdx[1]], REF_PIC_LIST_1, uiPartAddr, iPartIdx, pcCU->getDepth(uiPartAddr));
+
+			uiMEBits = uiBits[1];
+		}
+
+#if AMP_MRG
+	}
+#endif
+
 #if HUANGFU_20170504
 	TComMv*  pcMv0;
 	TComMv*  pcMv1;
@@ -3853,7 +4101,7 @@ Void TEncSearch::predInterSearch( TComDataCU* pcCU, TComYuv* pcOrgYuv, TComYuv* 
     motionCompensation ( pcCU, pcPredYuv, REF_PIC_LIST_X, iPartIdx );
 #if HUANGFU_20170504
 	pcMv0[uiPartAddr].setPos(0);
-	pcMv1[uiPartAddr].setPos(1);
+	pcMv1[uiPartAddr].setPos(0);
 #endif
 
   } //  end of for ( Int iPartIdx = 0; iPartIdx < iNumPart; iPartIdx++ )
