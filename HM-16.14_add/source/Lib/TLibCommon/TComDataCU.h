@@ -176,6 +176,10 @@ public:
   // create / destroy / initialize / copy
   // -------------------------------------------------------------------------------------------------------------------
 
+
+
+
+
   Void          create                        ( ChromaFormat chromaFormatIDC, UInt uiNumPartition, UInt uiWidth, UInt uiHeight, Bool bDecSubCu, Int unitSize
 #if ADAPTIVE_QP_SELECTION
                                                 , TCoeff *pParentARLBuffer = 0
@@ -294,6 +298,13 @@ public:
 
         TComCUMvField* getCUMvField           ( RefPicList e )                                             { return &m_acCUMvField[e];                  }
   const TComCUMvField* getCUMvField           ( RefPicList e ) const                                       { return &m_acCUMvField[e];                  }
+#if HUANGFU_20170522
+  Void setAllMv_d( Int iRefList,Int nPsw, Int nPsH, Int uipartAddr, Int CUzorderaddr, Int idx, TComMv MV, TComMv pred);
+ 
+#endif
+
+
+
 
   TCoeff*       getCoeff                      ( ComponentID component )                                    { return m_pcTrCoeff[component];             }
 

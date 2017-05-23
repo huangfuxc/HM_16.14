@@ -1887,7 +1887,39 @@ Void TComDataCU::setTransformSkipSubParts( const UInt useTransformSkip[MAX_NUM_C
     memset( m_puhTransformSkip[i] + uiAbsPartIdx, useTransformSkip[i], sizeof( UChar ) * uiCurrPartNumb );
   }
 }
+Void TComDataCU::setAllMv_d( Int iRefList, Int nPsw, Int nPsH, Int uipartAddr, Int CUzorderaddr, Int idx, TComMv MV, TComMv pred)
+{
 
+	TComMv* pcMv0 = getCUMvField(RefPicList(iRefList))->getMv();
+	if (idx == 1)
+	{
+		for (int i = 0; i < nPsH / 4; i++)
+		{
+			for (int j = 0; j < nPsw / 4; j++)
+			{
+				TComMv cMv1 = getCUMvField(RefPicList(iRefList))->getMv(g_auiRasterToZscan[g_auiZscanToRaster[uipartAddr + CUzorderaddr] + j + 16 * i] - CUzorderaddr);
+				Int mvx = cMv1.getHor() + MV.getHor() - pred.getHor();
+				Int mvy = cMv1.getVer() + MV.getVer() - pred.getVer();
+				pcMv0[g_auiRasterToZscan[g_auiZscanToRaster[uipartAddr + CUzorderaddr] + j + 16 * i] - CUzorderaddr].setHor(mvx);
+				pcMv0[g_auiRasterToZscan[g_auiZscanToRaster[uipartAddr + CUzorderaddr] + j + 16 * i] - CUzorderaddr].setVer(mvy);
+			}
+		}
+	}
+	else if (idx == 2)
+	{
+		for (int i = 0; i < nPsH / 4; i++)
+		{
+			for (int j = 0; j < nPsw / 4; j++)
+			{
+				Int mvx =  MV.getHor() - pred.getHor();
+				Int mvy =  MV.getVer() - pred.getVer();
+				pcMv0[g_auiRasterToZscan[g_auiZscanToRaster[uipartAddr + CUzorderaddr] + j + 16 * i] - CUzorderaddr].setHor(mvx);
+				pcMv0[g_auiRasterToZscan[g_auiZscanToRaster[uipartAddr + CUzorderaddr] + j + 16 * i] - CUzorderaddr].setVer(mvy);
+			}
+		}
+	}
+
+}
 Void TComDataCU::setTransformSkipSubParts( UInt useTransformSkip, ComponentID compID, UInt uiAbsPartIdx, UInt uiDepth)
 {
   UInt uiCurrPartNumb = m_pcPic->getNumPartitionsInCtu() >> (uiDepth << 1);

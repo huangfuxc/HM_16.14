@@ -93,6 +93,9 @@ class TComCUMvField
 private:
   TComMv*   m_pcMv;
   TComMv*   m_pcMvd;
+#if HUANGFU_20170522
+  TComMv*   m_pcMvpred;
+#endif
   SChar*    m_piRefIdx;
   UInt      m_uiNumPartition;
   AMVPInfo  m_cAMVPInfo;
@@ -126,6 +129,7 @@ public:
   // ------------------------------------------------------------------------------------------------------------------
  # if HUANGFU_2017_04_27
   TComMv*  getMv()  { return  m_pcMv; }
+  TComMv*  getMvd()  { return  m_pcMvd; }
 #endif
   TComMv const & getMv    ( Int iIdx ) const { return  m_pcMv    [iIdx]; }
   TComMv const & getMvd   ( Int iIdx ) const { return  m_pcMvd   [iIdx]; }
